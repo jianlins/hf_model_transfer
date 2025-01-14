@@ -10,6 +10,7 @@ on:
       file_filter:
         description: 'Filter pattern (e.g. q4_k_m)'
         required: true
+        default: 'q8'
         type: string
       split_size:
         description: 'Split size in MB for releases'
