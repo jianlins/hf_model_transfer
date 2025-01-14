@@ -115,6 +115,7 @@ jobs:
           echo "base_name=$BASE_NAME" >> $env:GITHUB_OUTPUT
 
       - name: Merge split files
+        id: merge_files
         run: |
           cd D:\models
           Write-Host "=== Directory contents before merge ==="
@@ -125,6 +126,7 @@ jobs:
             # Improved pattern extraction to handle GGUF files correctly
             $BASE_PATTERN = $FIRST_SPLIT.Name -replace '-\d+-of-\d+.*\.gguf$',''
             $TARGET_NAME = "$BASE_PATTERN.gguf"
+            echo "target_name=$TARGET_NAME" >> $env:GITHUB_OUTPUT
             
             Write-Host "Source file: $($FIRST_SPLIT.Name)"
             Write-Host "Base pattern: $BASE_PATTERN"
@@ -132,25 +134,30 @@ jobs:
             
             try {
                 & C:\bin\llama-gguf-split --merge $FIRST_SPLIT.Name $TARGET_NAME
+            } catch {
+                Write-Error "Error during merge: $_"
+                exit 1
+            }
+             try {
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host "Merge successful"
                     # Remove split files only after successful merge
                     Get-ChildItem -Filter "$BASE_PATTERN-*-of-*.gguf.*" | Remove-Item
                 } else {
-                    throw "Merge command failed with exit code $LASTEXITCODE"
+                    throw "Clean failed with exit code $LASTEXITCODE"
                 }
             } catch {
-                Write-Error "Error during merge: $_"
-                exit 1
+                Write-Error "Error during delete: $_"
             }
           } else {
             Write-Host "No split files found, skipping merge"
           }
 
+
       - name: Create volumes
         run: |
           mkdir D:\volumes
-          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.base_name }}.7z" "D:\models\*"
+          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.merge_files.outputs.target_name }}.7z" "D:\models\${{ steps.merge_files.outputs.target_name }}"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
