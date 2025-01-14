@@ -30,7 +30,7 @@ jobs:
         run: |
           # Get latest release download URL for Linux binary
           LATEST_URL=$(curl -s https://api.github.com/repos/ggerganov/llama.cpp/releases/latest | \
-            jq -r '.assets[] | select(.name | test("Linux-x64.zip$")) | .browser_download_url')
+            jq -r '.assets[] | select(.name | test("ubuntu-x64.zip$")) | .browser_download_url')
           
           # Download and extract
           mkdir -p llama_cpp && cd llama_cpp
