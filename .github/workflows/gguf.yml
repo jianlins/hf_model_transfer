@@ -1,34 +1,32 @@
-name: Transfer GGUF Models
+name: Archive HuggingFace GGUF Models
 
 on:
   workflow_dispatch:
     inputs:
       model_name:
-        description: 'HuggingFace model repo (e.g. Qwen/Qwen2.5-Coder-3B-Instruct-GGUF)'
+        description: 'HuggingFace model repo'
         required: true
         default: 'Qwen/Qwen2.5-Coder-3B-Instruct-GGUF'
         type: string
       file_filter:
-        description: 'Filter pattern (e.g. q4_k_m)'
+        description: 'Filter pattern'
         required: true
         default: 'q8'
         type: string
       split_size:
-        description: 'Split size in MB for releases'
+        description: 'Split size in MB'
         required: false
         default: '800'
         type: string
 
 jobs:
   download-gguf:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-    
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      
+      - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
@@ -36,66 +34,57 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -U "huggingface_hub[cli]"
-          sudo apt-get update
-          sudo apt-get install -y p7zip-full jq
+          choco install 7zip -y
 
       - name: Setup llama.cpp tools
         run: |
-          # Get latest release download URL for Linux binary
-          LATEST_URL=$(curl -s https://api.github.com/repos/ggerganov/llama.cpp/releases/latest | \
-            jq -r '.assets[] | select(.name | test("ubuntu-x64.zip$")) | .browser_download_url')
-          
-          # Download and extract
-          mkdir -p llama_cpp && cd llama_cpp
-          curl -L $LATEST_URL -o llama.zip
-          unzip llama.zip
-          
-          # Make binary executable and move to path
-          chmod +x build/bin/llama-gguf-split
-          sudo mv build/bin/llama-gguf-split /usr/local/bin/
-          cd .. && rm -rf llama_cpp
+          $LATEST_URL = (Invoke-WebRequest -Uri "https://api.github.com/repos/ggerganov/llama.cpp/releases/latest" | ConvertFrom-Json).assets | Where-Object { $_.name -match "win-avx2-x64.zip" } | Select-Object -ExpandProperty browser_download_url
+          Invoke-WebRequest -Uri $LATEST_URL -OutFile llama.zip
+          Expand-Archive llama.zip -DestinationPath .
+          Copy-Item "build\bin\llama-gguf-split.exe" -Destination "C:\Windows\System32"
 
       - name: Download GGUF files
         env:
-          HF_MODEL: ${{ github.event.inputs.model_name }}
-          FILE_FILTER: ${{ github.event.inputs.file_filter }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          mkdir -p ./models
-          huggingface-cli download $HF_MODEL --include "*${FILE_FILTER}*.gguf*" --local-dir ./models
+          mkdir D:\models
+          huggingface-cli download ${{ github.event.inputs.model_name }} --include "*${{ github.event.inputs.file_filter }}*.gguf*" --local-dir D:\models
+
+      - name: Get base name
+        id: get_base_name
+        run: |
+          $BASE_NAME = (Get-ChildItem D:\models -Filter "*.gguf" | Select-Object -First 1).BaseName
+          echo "base_name=$BASE_NAME" >> $env:GITHUB_OUTPUT
 
       - name: Merge split files
         run: |
-          cd ./models
-          if ls *.gguf.* 1> /dev/null 2>&1; then
-            BASE_NAME=$(ls *.gguf.* | head -n1 | sed 's/\.[0-9]*$//')
-            llama-gguf-split --merge ${BASE_NAME}
-            rm ${BASE_NAME}.*
-          fi
+          cd D:\models
+          $SPLIT_FILES = Get-ChildItem -Filter "*-00001-of-*.gguf.*"
+          if ($SPLIT_FILES.Count -gt 0) {
+            $FIRST_SPLIT = $SPLIT_FILES[0]
+            # Extract base name pattern (e.g. "model-q4_k_m" from "model-q4_k_m-00001-of-00014.gguf.1")
+            $BASE_PATTERN = $FIRST_SPLIT.Name -replace '-00001-of-\d+\.gguf\.\d+$',''
+            $TARGET_NAME = "$BASE_PATTERN.gguf"
+            
+            Write-Host "Merging $($FIRST_SPLIT.Name) to $TARGET_NAME"
+            llama-gguf-split --merge $FIRST_SPLIT.Name $TARGET_NAME
+            
+            # Only remove split parts after successful merge
+            Get-ChildItem -Filter "$BASE_PATTERN-*-of-*.gguf.*" | Remove-Item
+          } else {
+            Write-Host "No split files found, skipping merge"
+          }
 
       - name: Create volumes
-        env:
-          SPLIT_SIZE: ${{ github.event.inputs.split_size }}
         run: |
-          cd ./models
-          BASE_NAME=$(ls *.gguf | head -n1 | sed 's/\.gguf$//')
-          cd ..
-          mkdir -p ./volumes
-          7z a -v${SPLIT_SIZE}m "./volumes/${BASE_NAME}.7z" ./models/*
+          mkdir D:\volumes
+          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.base_name }}.7z" "D:\models\*"
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
-        env:
-          BASE_NAME: $(cd ./models && ls *.gguf | head -n1 | sed 's/\.gguf$//')
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${BASE_NAME}-${{ github.sha }}
-          name: ${BASE_NAME}
-          draft: false
-          prerelease: false
-          files: ./volumes/*          
-
-      - name: Cleanup
-        if: always()
-        run: |
-          rm -rf ./models ./volumes
+          tag_name: ${{ steps.get_base_name.outputs.base_name }}-${{ github.sha }}
+          name: ${{ steps.get_base_name.outputs.base_name }}
+          files: D:/volumes/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
