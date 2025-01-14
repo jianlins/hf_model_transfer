@@ -26,22 +26,34 @@ jobs:
     
     steps:
       - uses: actions/checkout@v3
-      
+
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+
+      - name: Cache dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~\AppData\Local\pip\Cache
+            C:\ProgramData\chocolatey\lib
+          key: ${{ runner.os }}-deps-${{ hashFiles('.github/workflows/gguf.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-deps-
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -U "huggingface_hub[cli]"
           choco install 7zip -y
+        env:
+          ChocolateyInstall: "C:\\ProgramData\\chocolatey"
 
       - name: Setup llama.cpp tools
         run: |
           # Create temp directory
-          New-Item -ItemType Directory -Path "D:\llama_cpp" -Force
-          cd D:\llama_cpp
+          New-Item -ItemType Directory -Path "C:\llama_cpp" -Force
+          cd C:\llama_cpp
           
           # Get Windows AVX2 binary URL
           $LATEST_URL = (Invoke-WebRequest -Uri "https://api.github.com/repos/ggerganov/llama.cpp/releases/latest" | 
@@ -54,14 +66,37 @@ jobs:
           Expand-Archive -Path llama.zip -DestinationPath .
           
           # Add to PATH
-          New-Item -ItemType Directory -Path "D:\bin" -Force
-          Move-Item -Path "llama-gguf-split.exe" -Destination "D:\bin"
-          $env:Path += ";D:\bin"
+          New-Item -ItemType Directory -Path "C:\bin" -Force
+          Move-Item -Path "llama-gguf-split.exe" -Destination "C:\bin"
+          $env:Path += ";C:\bin"
           
           # Cleanup
           cd ..
-          Remove-Item -Recurse -Force D:\llama_cpp
+          Remove-Item -Recurse -Force C:\llama_cpp
 
+      - name: Check disk space
+        shell: pwsh
+        run: |
+          try {
+            Get-Volume | Where-Object {$_.DriveLetter -ne $null} | ForEach-Object {
+              $drive = $_
+              if ($drive.Size -gt 0) {
+                $freeGB = [math]::Round($drive.SizeRemaining/1GB, 2)
+                $totalGB = [math]::Round($drive.Size/1GB, 2)
+                $usedGB = [math]::Round(($drive.Size - $drive.SizeRemaining)/1GB, 2)
+                $freePercent = [math]::Round(($drive.SizeRemaining/$drive.Size)*100, 1)
+                Write-Host "Drive $($drive.DriveLetter):"
+                Write-Host "  Total: ${totalGB} GB"
+                Write-Host "  Used:  ${usedGB} GB"
+                Write-Host "  Free:  ${freeGB} GB ($freePercent%)"
+                Write-Host "-------------------"
+              }
+            }
+          } catch {
+            Write-Error "Error checking disk space: $_"
+            exit 1
+          }         
+                
       - name: Download GGUF files
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
