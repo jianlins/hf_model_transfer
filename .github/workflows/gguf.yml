@@ -138,7 +138,9 @@ jobs:
                 Write-Error "Error during merge: $_"
                 exit 1
             }
-             try {
+            Start-Sleep -Seconds 10
+            Get-ChildItem -Path .\
+            try {
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host "Merge successful"
                     # Remove split files only after successful merge
