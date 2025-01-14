@@ -23,21 +23,28 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Check disk space
+        shell: pwsh
         run: |
-          Write-Host "Checking disk space on all drives:"
-          Get-Volume | Where-Object {$_.DriveLetter} | ForEach-Object {
-            $drive = $_
-            $freeGB = [math]::Round($drive.SizeRemaining/1GB, 2)
-            $totalGB = [math]::Round($drive.Size/1GB, 2)
-            $usedGB = [math]::Round(($drive.Size - $drive.SizeRemaining)/1GB, 2)
-            $freePercent = [math]::Round(($drive.SizeRemaining/$drive.Size)*100, 1)
-            
-            Write-Host "Drive $($drive.DriveLetter):"
-            Write-Host "  Total: ${totalGB} GB"
-            Write-Host "  Used:  ${usedGB} GB"
-            Write-Host "  Free:  ${freeGB} GB ($freePercent%)"
-            Write-Host "-------------------"
-          }        
+          try {
+            Get-Volume | Where-Object {$_.DriveLetter -ne $null} | ForEach-Object {
+              $drive = $_
+              if ($drive.Size -gt 0) {
+                $freeGB = [math]::Round($drive.SizeRemaining/1GB, 2)
+                $totalGB = [math]::Round($drive.Size/1GB, 2)
+                $usedGB = [math]::Round(($drive.Size - $drive.SizeRemaining)/1GB, 2)
+                $freePercent = [math]::Round(($drive.SizeRemaining/$drive.Size)*100, 1)
+                
+                Write-Host "Drive $($drive.DriveLetter):"
+                Write-Host "  Total: ${totalGB} GB"
+                Write-Host "  Used:  ${usedGB} GB"
+                Write-Host "  Free:  ${freeGB} GB ($freePercent%)"
+                Write-Host "-------------------"
+              }
+            }
+          } catch {
+            Write-Error "Error checking disk space: $_"
+            exit 1
+          }    
 
       - name: Set up Python
         uses: actions/setup-python@v4
