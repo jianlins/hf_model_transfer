@@ -62,7 +62,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           mkdir -p ./models
-          huggingface-cli download --token $HF_TOKEN $HF_MODEL --include "*${FILE_FILTER}*.gguf*" --local-dir ./models
+          huggingface-cli download $HF_MODEL --include "*${FILE_FILTER}*.gguf*" --local-dir ./models
 
       - name: Merge split files
         run: |
