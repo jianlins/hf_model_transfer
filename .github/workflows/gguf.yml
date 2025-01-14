@@ -1,0 +1,87 @@
+name: Download and Archive GGUF Models
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_name:
+        description: 'HuggingFace model repo (e.g. Qwen/Qwen2.5-7B-Instruct-GGUF)'
+        required: true
+        type: string
+      file_filter:
+        description: 'Filter pattern (e.g. q4_k_m)'
+        required: true
+        type: string
+      split_size:
+        description: 'Split size in MB for releases'
+        required: false
+        default: '1900'
+        type: string
+
+jobs:
+  download-gguf:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup llama.cpp tools
+        run: |
+          # Get latest release download URL for Linux binary
+          LATEST_URL=$(curl -s https://api.github.com/repos/ggerganov/llama.cpp/releases/latest | \
+            jq -r '.assets[] | select(.name | test("Linux-x64.zip$")) | .browser_download_url')
+          
+          # Download and extract
+          mkdir -p llama_cpp && cd llama_cpp
+          curl -L $LATEST_URL -o llama.zip
+          unzip llama.zip
+          
+          # Make binary executable and move to path
+          chmod +x llama-gguf-split
+          sudo mv llama-gguf-split /usr/local/bin/
+          cd .. && rm -rf llama_cpp
+
+      - name: Download GGUF files
+        env:
+          HF_MODEL: ${{ github.event.inputs.model_name }}
+          FILE_FILTER: ${{ github.event.inputs.file_filter }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          mkdir -p ./models
+          huggingface-cli download --token $HF_TOKEN $HF_MODEL --include "*${FILE_FILTER}*.gguf*" --local-dir ./models
+
+      - name: Merge split files
+        run: |
+          cd ./models
+          if ls *.gguf.* 1> /dev/null 2>&1; then
+            BASE_NAME=$(ls *.gguf.* | head -n1 | sed 's/\.[0-9]*$//')
+            llama-gguf-split --merge ${BASE_NAME}
+            rm ${BASE_NAME}.*
+          fi
+
+      - name: Create volumes
+        env:
+          SPLIT_SIZE: ${{ github.event.inputs.split_size }}
+        run: |
+          cd ./models
+          BASE_NAME=$(ls *.gguf | head -n1 | sed 's/\.gguf$//')
+          cd ..
+          mkdir -p ./volumes
+          7z a -v${SPLIT_SIZE}m "./volumes/${BASE_NAME}.7z" ./models/*
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        env:
+          BASE_NAME: $(cd ./models && ls *.gguf | head -n1 | sed 's/\.gguf$//')
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${BASE_NAME}-${{ github.sha }}
+          name: ${BASE_NAME}
+          draft: false
+          prerelease: false
+          files: ./volumes/*          
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf ./models ./volumes
