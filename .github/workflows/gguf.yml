@@ -96,7 +96,7 @@ jobs:
             Write-Error "Error checking disk space: $_"
             exit 1
           }         
-                
+
       - name: Download GGUF files
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
@@ -107,7 +107,11 @@ jobs:
       - name: Get base name
         id: get_base_name
         run: |
-          $BASE_NAME = (Get-ChildItem D:\models -Filter "*.gguf" | Select-Object -First 1).BaseName
+          $OriginalName = (Get-ChildItem D:\models -Filter "*.gguf" | Select-Object -First 1).Name
+          $BASE_NAME = $OriginalName -replace '-\d+-of-\d+\.gguf$', '.gguf'
+          if ($BASE_NAME.StartsWith('wen')) {
+            $BASE_NAME = 'q' + $BASE_NAME
+          }
           echo "base_name=$BASE_NAME" >> $env:GITHUB_OUTPUT
 
       - name: Merge split files
