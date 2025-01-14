@@ -1,0 +1,82 @@
+name: Transfer HuggingFace Models
+run-name: Transfer ${{ github.event.inputs.model_name }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_name:
+        description: 'HuggingFace model name'
+        required: true
+        type: string
+      split_size:
+        description: 'Split size in MB (default: 800)'
+        required: false
+        default: '800'
+        type: string
+
+jobs:
+  archive-models:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Check disk space
+        run: |
+          Write-Host "Checking disk space on all drives:"
+          Get-Volume | Where-Object {$_.DriveLetter} | ForEach-Object {
+            $drive = $_
+            $freeGB = [math]::Round($drive.SizeRemaining/1GB, 2)
+            $totalGB = [math]::Round($drive.Size/1GB, 2)
+            $usedGB = [math]::Round(($drive.Size - $drive.SizeRemaining)/1GB, 2)
+            $freePercent = [math]::Round(($drive.SizeRemaining/$drive.Size)*100, 1)
+            
+            Write-Host "Drive $($drive.DriveLetter):"
+            Write-Host "  Total: ${totalGB} GB"
+            Write-Host "  Used:  ${usedGB} GB"
+            Write-Host "  Free:  ${freeGB} GB ($freePercent%)"
+            Write-Host "-------------------"
+          }        
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install huggingface-cli
+          sudo apt-get install p7zip-full
+
+      - name: Download model
+        env:
+          HF_MODEL: ${{ github.event.inputs.model_name }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          huggingface-cli download --token $HF_TOKEN $HF_MODEL --local-dir ./models
+
+      - name: Create volumes
+        env:
+          SPLIT_SIZE: ${{ github.event.inputs.split_size }}
+        run: |
+          7z a -v${SPLIT_SIZE}m ./volumes/model.7z ./models/*
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.model_name }}-${{ github.sha }}
+          name: Model Archive - ${{ github.event.inputs.model_name }}
+          draft: false
+          prerelease: false
+          files: ./volumes/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf ./models
+          rm -rf ./volumes
