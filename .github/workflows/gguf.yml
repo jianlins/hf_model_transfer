@@ -4,8 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       model_name:
-        description: 'HuggingFace model repo (e.g. Qwen/Qwen2.5-7B-Instruct-GGUF)'
+        description: 'HuggingFace model repo (e.g. Qwen/Qwen2.5-Coder-3B-Instruct-GGUF)'
         required: true
+        default: 'Qwen/Qwen2.5-Coder-3B-Instruct-GGUF'
         type: string
       file_filter:
         description: 'Filter pattern (e.g. q4_k_m)'
