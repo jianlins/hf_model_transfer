@@ -1,4 +1,5 @@
-name: Archive HuggingFace GGUF Models
+name: Transfer GGUF Models
+run-name: Transfer ${{ github.event.inputs.model_name }}
 
 on:
   workflow_dispatch:
