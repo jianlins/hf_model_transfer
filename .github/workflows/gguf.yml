@@ -131,7 +131,7 @@ jobs:
             Write-Host "Target name: $TARGET_NAME"
             
             try {
-                & D:\bin\llama-gguf-split --merge $FIRST_SPLIT.Name $TARGET_NAME
+                & C:\bin\llama-gguf-split --merge $FIRST_SPLIT.Name $TARGET_NAME
                 if ($LASTEXITCODE -eq 0) {
                     Write-Host "Merge successful"
                     # Remove split files only after successful merge
