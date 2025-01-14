@@ -1,4 +1,4 @@
-name: Download and Archive GGUF Models
+name: Transfer GGUF Models
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ on:
       split_size:
         description: 'Split size in MB for releases'
         required: false
-        default: '1900'
+        default: '800'
         type: string
 
 jobs:
