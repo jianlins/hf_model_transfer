@@ -38,10 +38,28 @@ jobs:
 
       - name: Setup llama.cpp tools
         run: |
-          $LATEST_URL = (Invoke-WebRequest -Uri "https://api.github.com/repos/ggerganov/llama.cpp/releases/latest" | ConvertFrom-Json).assets | Where-Object { $_.name -match "win-avx2-x64.zip" } | Select-Object -ExpandProperty browser_download_url
+          # Create temp directory
+          New-Item -ItemType Directory -Path "D:\llama_cpp" -Force
+          cd D:\llama_cpp
+          
+          # Get Windows AVX2 binary URL
+          $LATEST_URL = (Invoke-WebRequest -Uri "https://api.github.com/repos/ggerganov/llama.cpp/releases/latest" | 
+            ConvertFrom-Json).assets | 
+            Where-Object { $_.name -match "win-avx2-x64.zip" } | 
+            Select-Object -ExpandProperty browser_download_url
+          
+          # Download and extract
           Invoke-WebRequest -Uri $LATEST_URL -OutFile llama.zip
-          Expand-Archive llama.zip -DestinationPath .
-          Copy-Item "build\bin\llama-gguf-split.exe" -Destination "C:\Windows\System32"
+          Expand-Archive -Path llama.zip -DestinationPath .
+          
+          # Add to PATH
+          New-Item -ItemType Directory -Path "D:\bin" -Force
+          Move-Item -Path "llama-gguf-split.exe" -Destination "D:\bin"
+          $env:Path += ";D:\bin"
+          
+          # Cleanup
+          cd ..
+          Remove-Item -Recurse -Force D:\llama_cpp
 
       - name: Download GGUF files
         env:
@@ -67,7 +85,7 @@ jobs:
             $TARGET_NAME = "$BASE_PATTERN.gguf"
             
             Write-Host "Merging $($FIRST_SPLIT.Name) to $TARGET_NAME"
-            llama-gguf-split --merge $FIRST_SPLIT.Name $TARGET_NAME
+            D:\bin\llama-gguf-split --merge $FIRST_SPLIT.Name $TARGET_NAME
             
             # Only remove split parts after successful merge
             Get-ChildItem -Filter "$BASE_PATTERN-*-of-*.gguf.*" | Remove-Item
