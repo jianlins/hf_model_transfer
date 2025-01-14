@@ -119,11 +119,11 @@ jobs:
           cd D:\models
           Write-Host "=== Directory contents before merge ==="
           Get-ChildItem | Format-Table Name, Length
-          $SPLIT_FILES = Get-ChildItem -Filter "*-00001-of-*.gguf.*"
+          $SPLIT_FILES = Get-ChildItem -Filter "*001-of-*.gguf.*"
           if ($SPLIT_FILES.Count -gt 0) {
             $FIRST_SPLIT = $SPLIT_FILES[0]
             # Improved pattern extraction to handle GGUF files correctly
-            $BASE_PATTERN = $FIRST_SPLIT.Name -replace '-\d{5}-of-\d{5}\.gguf\.\d+$',''
+            $BASE_PATTERN = $FIRST_SPLIT.Name -replace '-\d+-of-\d+.*\.gguf\.\d+$',''
             $TARGET_NAME = "$BASE_PATTERN.gguf"
             
             Write-Host "Source file: $($FIRST_SPLIT.Name)"
