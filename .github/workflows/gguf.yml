@@ -139,21 +139,28 @@ jobs:
                 exit 1
             }
             Start-Sleep -Seconds 10
-            Get-ChildItem -Path .\
-            try {
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "Merge successful"
-                    # Remove split files only after successful merge
-                    Get-ChildItem -Filter "$BASE_PATTERN-*-of-*.gguf.*" | Remove-Item
-                } else {
-                    throw "Clean failed with exit code $LASTEXITCODE"
-                }
-            } catch {
-                Write-Error "Error during delete: $_"
-            }
           } else {
             Write-Host "No split files found, skipping merge"
           }
+
+      - name: clean files
+        id: clean
+        run: |  
+          cd D:\models          
+          Get-ChildItem -Path .\
+          try {
+              if ($LASTEXITCODE -eq 0) {
+                  Write-Host "Merge successful"
+                  # Remove split files only after successful merge
+                  Get-ChildItem -Filter "$BASE_PATTERN-*-of-*.gguf.*" | Remove-Item
+              } else {
+                  throw "Clean failed with exit code $LASTEXITCODE"
+              }
+          } catch {
+              Write-Error "Error during delete: $_"
+          }
+          Get-ChildItem -Path .\
+        
 
 
       - name: Create volumes
