@@ -133,10 +133,10 @@ jobs:
             Write-Host "Target name: $TARGET_NAME"
             
             try {
-                & C:\bin\llama-gguf-split --merge $FIRST_SPLIT.Name $TARGET_NAME
+              C:\bin\llama-gguf-split --merge $FIRST_SPLIT.Name $TARGET_NAME
             } catch {
-                Write-Error "Error during merge: $_"
-                exit 1
+              Write-Error "Error during merge: $_"
+              exit 1
             }
             Start-Sleep -Seconds 10
           } else {
