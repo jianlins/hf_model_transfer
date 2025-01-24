@@ -19,6 +19,11 @@ on:
         required: false
         default: '800'
         type: string
+      merge_gguf:
+        description: 'Whether merge the split gguf files'
+        required: false
+        default: 'false'
+        type: string
 
 jobs:
   download-gguf:
@@ -115,6 +120,7 @@ jobs:
           echo "base_name=$BASE_NAME" >> $env:GITHUB_OUTPUT
 
       - name: Merge split files
+        if: ${{ github.event.inputs.merge_gguf == 'true' }}
         id: merge_files
         run: |
           cd D:\models
@@ -143,6 +149,7 @@ jobs:
           }
 
       - name: clean files
+        if: ${{ github.event.inputs.merge_gguf == 'true' }}
         id: clean
         run: |  
           cd D:\models          
@@ -162,10 +169,18 @@ jobs:
         
 
 
-      - name: Create volumes
+      - name: 7zip merged file
+        if: ${{ github.event.inputs.merge_gguf == 'true' }}
         run: |
           mkdir D:\volumes
           7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.merge_files.outputs.target_name }}.7z" "D:\models\${{ steps.merge_files.outputs.target_name }}"
+      
+      - name: 7zip folder
+        if: ${{ github.event.inputs.merge_gguf == 'false' }}
+        run: |
+          mkdir D:\volumes
+          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.merge_files.outputs.target_name }}.7z" "D:\models"
+      
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
