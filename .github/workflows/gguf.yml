@@ -193,3 +193,56 @@ jobs:
           files: D:/volumes/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.get_base_name.outputs.base_name }}-${{ github.event.inputs.file_filter }}-${{ github.sha }}
+          name: ${{ steps.get_base_name.outputs.base_name }}-${{ github.event.inputs.file_filter }}
+          draft: false
+          prerelease: false   
+  
+      - name: Upload release
+        id: upload_release
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |          
+            const path = require('path');
+            const fs = require('fs');
+            
+            // Retrieve necessary information
+            const release_id = `${{ steps.create_release.outputs.id }}`;
+            const release_url = `${{ steps.create_release.outputs.html_url }}`;
+  
+            let releaseDescription = '';
+  
+            // Append the file URL to the release description           
+            releaseDescription += `This archive was created using following settings: `;
+            releaseDescription += `\nmodel_name: ${{ github.event.inputs.model_name }}`;
+            releaseDescription += `\nfile_filter: ${{ github.event.inputs.file_filter }}`;
+            releaseDescription += `\nsplit_size: ${{ github.event.inputs.split_size }}`;
+            releaseDescription += `\nmerge_gguf: ${{ github.event.inputs.merge_gguf }}`;
+  
+            // Update the release with the description
+            await github.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id,
+                body: releaseDescription,
+            });
+          
+            for (let file of await fs.readdirSync('D:/volumes')) {
+                console.log('uploadReleaseAsset', file);
+                await github.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: release_id,
+                  name: file,
+                  data: await fs.readFileSync(path.join('D:/volumes', file))
+                });
+            }          
