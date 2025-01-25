@@ -1,5 +1,5 @@
 name: Transfer GGUF Models
-run-name: Transfer ${{ github.event.inputs.model_name }}-{{ github.event.inputs.file_filter }}
+run-name: Transfer ${{ github.event.inputs.model_name }}-${{ github.event.inputs.file_filter }}
 
 on:
   workflow_dispatch:
