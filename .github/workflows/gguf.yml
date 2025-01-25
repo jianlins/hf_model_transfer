@@ -174,14 +174,14 @@ jobs:
         if: ${{ github.event.inputs.merge_gguf == 'true' }}
         run: |
           mkdir D:\volumes
-          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.merge_files.outputs.target_name }}.7z" "D:\models\${{ steps.merge_files.outputs.target_name }}"
+          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.BASE_NAME }}.7z" "D:\models\${{ steps.merge_files.outputs.TARGET_NAME }}"
       
       - name: 7zip folder
         if: ${{ github.event.inputs.merge_gguf == 'false' }}
         shell: bash
         run: |
           mkdir D:\volumes
-          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.merge_files.outputs.target_name }}.7z" "D:\models"
+          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.BASE_NAME }}.7z" "D:\models"
           ls D:\volumes
       
 
