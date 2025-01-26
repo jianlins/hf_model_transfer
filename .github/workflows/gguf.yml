@@ -182,8 +182,10 @@ jobs:
         run: |
           mkdir D:\volumes
           7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.BASE_NAME }}.7z" "D:\models"
-          ls D:\volumes
       
+      - name: check zipped
+        shell: bash
+        run: ls D:\volumes
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
@@ -236,13 +238,83 @@ jobs:
                 body: releaseDescription,
             });
           
-            for (let file of await fs.readdirSync('D:/volumes')) {
-                console.log('uploadReleaseAsset', file);
+      - name: Upload release batch 1
+        id: upload_release_batch1
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const path = require('path');
+            const fs = require('fs');
+            
+            const files = await fs.readdirSync('D:/volumes');
+            const batch1 = files.slice(0, 38);
+            
+            for (let file of batch1) {
+                console.log('uploadReleaseAsset batch1:', file);
                 await github.repos.uploadReleaseAsset({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
-                  release_id: release_id,
+                  release_id: '${{ steps.create_release.outputs.id }}',
                   name: file,
                   data: await fs.readFileSync(path.join('D:/volumes', file))
                 });
-            }          
+            }
+    
+      - name: Upload release batch 2
+        id: upload_release_batch2
+        if: ${{ success() }}
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const path = require('path');
+            const fs = require('fs');
+            
+            const files = await fs.readdirSync('D:/volumes');
+            const batch2 = files.slice(38, 76);
+            
+            if (batch2.length === 0) {
+              console.log('No files for batch 2');
+              return;
+            }
+            
+            for (let file of batch2) {
+                console.log('uploadReleaseAsset batch2:', file);
+                await github.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: '${{ steps.create_release.outputs.id }}',
+                  name: file,
+                  data: await fs.readFileSync(path.join('D:/volumes', file))
+                });
+            }
+      
+      - name: Upload release batch 3
+        id: upload_release_batch3
+        if: ${{ success() }}
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const path = require('path');
+            const fs = require('fs');
+            
+            const files = await fs.readdirSync('D:/volumes');
+            const batch3 = files.slice(76);
+            
+            if (batch3.length === 0) {
+              console.log('No files for batch 3');
+              return;
+            }
+            
+            for (let file of batch3) {
+                console.log('uploadReleaseAsset batch3:', file);
+                await github.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: '${{ steps.create_release.outputs.id }}',
+                  name: file,
+                  data: await fs.readFileSync(path.join('D:/volumes', file))
+                });
+            }
