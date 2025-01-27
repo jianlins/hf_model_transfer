@@ -187,15 +187,6 @@ jobs:
         shell: bash
         run: ls D:\volumes
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: ${{ steps.get_base_name.outputs.base_name }}-${{ github.event.inputs.file_filter }}-${{ github.sha }}
-          name: ${{ steps.get_base_name.outputs.base_name }}
-          files: D:/volumes/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
 
       - name: Create Release
         id: create_release
