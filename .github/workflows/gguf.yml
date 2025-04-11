@@ -113,10 +113,11 @@ jobs:
         id: get_base_name
         run: |
           $OriginalName = (Get-ChildItem D:\models -Filter "*.gguf" | Select-Object -First 1).Name
-          $BASE_NAME = $OriginalName -replace '-\d+-of-\d+\.gguf$', '.gguf'
+          $BASE_NAME = $OriginalName -replace '-(?:\d+-of-\d+|q\d+_\d+)\.gguf$', '.gguf'
           if ($BASE_NAME.StartsWith('wen')) {
             $BASE_NAME = 'q' + $BASE_NAME
           }
+          echo "base_name=$BASE_NAME"
           echo "base_name=$BASE_NAME" >> $env:GITHUB_OUTPUT
 
       - name: Merge split files
