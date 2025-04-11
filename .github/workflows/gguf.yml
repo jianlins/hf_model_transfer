@@ -42,7 +42,7 @@ jobs:
           path: |
             ~\AppData\Local\pip\Cache
             C:\ProgramData\chocolatey\lib
-          key: ${{ runner.os }}-deps-${{ hashFiles('.github/workflows/gguf.yml') }}
+          key: ${{ runner.os }}-deps-${{ hashFiles('.github/workflows/gguf.yml') }}${{ github.event.inputs.model_name }} ${{ github.event.inputs.file_filter }}
           restore-keys: |
             ${{ runner.os }}-deps-
 
