@@ -200,8 +200,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ steps.get_base_name.outputs.base_name }}-${{ github.event.inputs.file_filter }}-${{ github.sha }}
-          name: ${{ steps.get_base_name.outputs.base_name }}-${{ github.event.inputs.file_filter }}
+          tag_name: ${{ steps.get_base_name.outputs.base_name }}-${{ github.sha }}
+          name: ${{ steps.get_base_name.outputs.base_name }}
           draft: false
           prerelease: false   
   
