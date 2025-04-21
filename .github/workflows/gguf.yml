@@ -7,12 +7,12 @@ on:
       model_name:
         description: 'HuggingFace model repo'
         required: true
-        default: 'unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF'
+        default: 'wen/Qwen2.5-Coder-7B-Instruct-GGUF'
         type: string
       file_filter:
         description: 'Filter pattern'
         required: true
-        default: 'Q8'
+        default: 'q8_0.'
         type: string
       split_size:
         description: 'Split size in MB'
