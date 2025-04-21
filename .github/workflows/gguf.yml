@@ -189,7 +189,7 @@ jobs:
         run: |        
           ls -l D:/models
           mkdir D:\volumes
-          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.BASE_NAME }}.7z" "D:\models\*${{ github.event.inputs.file_filter }}*.gguf"
+          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.BASE_NAME }}.7z" "D:\models\*${{ github.event.inputs.file_filter }}*gguf"
       
       - name: check zipped
         shell: bash
