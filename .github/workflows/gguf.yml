@@ -108,6 +108,8 @@ jobs:
         run: |
           mkdir D:\models
           huggingface-cli download ${{ github.event.inputs.model_name }} --include "*${{ github.event.inputs.file_filter }}*.gguf*" --local-dir D:\models      - name: Get base name
+        
+      - name: Get base name  
         id: get_base_name
         run: |
           $OriginalName = (Get-ChildItem D:\models -Filter "*${{ github.event.inputs.file_filter }}*.gguf" | Where-Object { $_.Name -notmatch '-\d+-of-\d+\.gguf$' } | Select-Object -First 1).Name
