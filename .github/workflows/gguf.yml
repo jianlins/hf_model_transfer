@@ -107,7 +107,7 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           mkdir D:\models
-          huggingface-cli download ${{ github.event.inputs.model_name }} --include "*${{ github.event.inputs.file_filter }}*.gguf*" --local-dir D:\models
+          huggingface-cli download ${{ github.event.inputs.model_name }} --include "${{ github.event.inputs.file_filter }}" --local-dir D:\models
 
       - name: Get base name  
         id: get_base_name
