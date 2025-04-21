@@ -7,7 +7,7 @@ on:
       model_name:
         description: 'HuggingFace model repo'
         required: true
-        default: 'wen/Qwen2.5-Coder-7B-Instruct-GGUF'
+        default: 'qwen/Qwen2.5-Coder-7B-Instruct-GGUF'
         type: string
       file_filter:
         description: 'Filter pattern'
