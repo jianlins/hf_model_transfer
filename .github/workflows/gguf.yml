@@ -178,6 +178,7 @@ jobs:
 
       - name: 7zip merged file
         if: ${{ github.event.inputs.merge_gguf == 'true' }}
+        shell: bash
         run: |
           mkdir D:\volumes
           7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.BASE_NAME }}.7z" "D:\models\${{ steps.merge_files.outputs.TARGET_NAME }}"
@@ -185,13 +186,14 @@ jobs:
       - name: 7zip folder
         if: ${{ github.event.inputs.merge_gguf == 'false' }}
         shell: bash
-        run: |
+        run: |        
+          ls -l D:\models\
           mkdir D:\volumes
           7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.BASE_NAME }}.7z" "D:\models\*${{ github.event.inputs.file_filter }}*.gguf"
       
       - name: check zipped
         shell: bash
-        run: ls D:\volumes
+        run: ls -l D:\volumes
 
 
       - name: Create Release
