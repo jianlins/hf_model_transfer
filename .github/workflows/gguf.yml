@@ -7,12 +7,12 @@ on:
       model_name:
         description: 'HuggingFace model repo'
         required: true
-        default: 'qwen/Qwen2.5-Coder-7B-Instruct-GGUF'
+        default: 'unsloth/DeepSeek-R1-Distill-Qwen-32B-GGUF'
         type: string
       file_filter:
         description: 'Filter pattern'
         required: true
-        default: 'q8_0.'
+        default: 'Q8'
         type: string
       split_size:
         description: 'Split size in MB'
@@ -107,12 +107,12 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           mkdir D:\models
-          huggingface-cli download ${{ github.event.inputs.model_name }} --include "*${{ github.event.inputs.file_filter }}*gguf*" --local-dir D:\models      - name: Get base name
-        
+          huggingface-cli download ${{ github.event.inputs.model_name }} --include "*${{ github.event.inputs.file_filter }}*.gguf*" --local-dir D:\models
+
       - name: Get base name  
         id: get_base_name
         run: |
-          $OriginalName = (Get-ChildItem D:\models -Filter "*${{ github.event.inputs.file_filter }}*.gguf" | Where-Object { $_.Name -notmatch '-\d+-of-\d+\.gguf$' } | Select-Object -First 1).Name
+          $OriginalName = (Get-ChildItem D:\models -Filter "${{ github.event.inputs.file_filter }}" | Where-Object { $_.Name -notmatch '-\d+-of-\d+\.gguf$' } | Select-Object -First 1).Name
           if (-not $OriginalName) {
             $OriginalName = (Get-ChildItem D:\models -Filter "*.gguf" | Select-Object -First 1).Name
             $BASE_NAME = $OriginalName -replace '-\d+-of-\d+\.gguf$', '.gguf'
@@ -193,19 +193,125 @@ jobs:
         shell: bash
         run: ls D:\volumes
 
-      - name: Create Release and Upload Assets
-        uses: ncipollo/release-action@v1
+
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tag_name: ${{ steps.get_base_name.outputs.base_name }}-${{ github.event.inputs.file_filter }}-${{ github.sha }}
           name: ${{ steps.get_base_name.outputs.base_name }}-${{ github.event.inputs.file_filter }}
-          tag: ${{ steps.get_base_name.outputs.base_name }}-${{ github.event.inputs.file_filter }}-${{ github.sha }}
-          artifacts: "D:/volumes/*"
-          artifactContentType: application/x-7z-compressed
           draft: false
-          prerelease: false
-          token: ${{ secrets.GITHUB_TOKEN }}
-          body: |
-            This archive was created using following settings:
-            model_name: ${{ github.event.inputs.model_name }}
-            file_filter: ${{ github.event.inputs.file_filter }}
-            split_size: ${{ github.event.inputs.split_size }}
-            merge_gguf: ${{ github.event.inputs.merge_gguf }}
+          prerelease: false   
+  
+      - name: Upload release
+        id: upload_release
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |          
+            const path = require('path');
+            const fs = require('fs');
+            
+            // Retrieve necessary information
+            const release_id = `${{ steps.create_release.outputs.id }}`;
+            const release_url = `${{ steps.create_release.outputs.html_url }}`;
+  
+            let releaseDescription = '';
+  
+            // Append the file URL to the release description           
+            releaseDescription += `This archive was created using following settings: `;
+            releaseDescription += `\nmodel_name: ${{ github.event.inputs.model_name }}`;
+            releaseDescription += `\nfile_filter: ${{ github.event.inputs.file_filter }}`;
+            releaseDescription += `\nsplit_size: ${{ github.event.inputs.split_size }}`;
+            releaseDescription += `\nmerge_gguf: ${{ github.event.inputs.merge_gguf }}`;
+  
+            // Update the release with the description
+            await github.repos.updateRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id,
+                body: releaseDescription,
+            });
+          
+      - name: Upload release batch 1
+        id: upload_release_batch1
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const path = require('path');
+            const fs = require('fs');
+            
+            const files = await fs.readdirSync('D:/volumes');
+            const batch1 = files.slice(0, 38);
+            
+            for (let file of batch1) {
+                console.log('uploadReleaseAsset batch1:', file);
+                await github.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: '${{ steps.create_release.outputs.id }}',
+                  name: file,
+                  data: await fs.readFileSync(path.join('D:/volumes', file))
+                });
+            }
+    
+      - name: Upload release batch 2
+        id: upload_release_batch2
+        if: ${{ success() }}
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const path = require('path');
+            const fs = require('fs');
+            
+            const files = await fs.readdirSync('D:/volumes');
+            const batch2 = files.slice(38, 76);
+            
+            if (batch2.length === 0) {
+              console.log('No files for batch 2');
+              return;
+            }
+            
+            for (let file of batch2) {
+                console.log('uploadReleaseAsset batch2:', file);
+                await github.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: '${{ steps.create_release.outputs.id }}',
+                  name: file,
+                  data: await fs.readFileSync(path.join('D:/volumes', file))
+                });
+            }
+      
+      - name: Upload release batch 3
+        id: upload_release_batch3
+        if: ${{ success() }}
+        uses: actions/github-script@v3
+        with:
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const path = require('path');
+            const fs = require('fs');
+            
+            const files = await fs.readdirSync('D:/volumes');
+            const batch3 = files.slice(76);
+            
+            if (batch3.length === 0) {
+              console.log('No files for batch 3');
+              return;
+            }
+            
+            for (let file of batch3) {
+                console.log('uploadReleaseAsset batch3:', file);
+                await github.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: '${{ steps.create_release.outputs.id }}',
+                  name: file,
+                  data: await fs.readFileSync(path.join('D:/volumes', file))
+                });
+            }
