@@ -7,12 +7,12 @@ on:
       model_name:
         description: 'HuggingFace model repo'
         required: true
-        default: 'qwen/Qwen2.5-Coder-7B-Instruct-GGUF'
+        default: 'unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF'
         type: string
       file_filter:
         description: 'Filter pattern'
         required: true
-        default: '*q8_0.*'
+        default: '*Q8_0.*'
         type: string
       split_size:
         description: 'Split size in MB'
