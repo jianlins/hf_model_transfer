@@ -60,10 +60,10 @@ jobs:
           New-Item -ItemType Directory -Path "C:\llama_cpp" -Force
           cd C:\llama_cpp
           
-          # Get Windows AVX2 binary URL
+          # Get Windows cpu version binary URL
           $LATEST_URL = (Invoke-WebRequest -Uri "https://api.github.com/repos/ggerganov/llama.cpp/releases/latest" | 
             ConvertFrom-Json).assets | 
-            Where-Object { $_.name -match "win-avx2-x64.zip" } | 
+            Where-Object { $_.name -match "win-cpu-x64.zip" } | 
             Select-Object -ExpandProperty browser_download_url
           
           # Download and extract
