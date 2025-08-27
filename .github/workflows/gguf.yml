@@ -105,9 +105,10 @@ jobs:
       - name: Download GGUF files
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          PYTHONIOENCODING: "utf-8"
         run: |
           mkdir D:\models
-          huggingface-cli download ${{ github.event.inputs.model_name }} --include "${{ github.event.inputs.file_filter }}" --local-dir D:\models
+          hf download ${{ github.event.inputs.model_name }} --include "${{ github.event.inputs.file_filter }}" --local-dir D:\models
 
       - name: Get base name  
         id: get_base_name
@@ -203,7 +204,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.get_base_name.outputs.base_name }}-${{ github.sha }}
-          name: ${{ steps.get_base_name.outputs.base_name }}
+          release_name: ${{ steps.get_base_name.outputs.base_name }}
           draft: false
           prerelease: false   
   
