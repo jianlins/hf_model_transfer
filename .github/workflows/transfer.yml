@@ -69,7 +69,7 @@ jobs:
           HF_MODEL: ${{ github.event.inputs.model_name }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          hf download --token $env:HF_TOKEN $env:HF_MODEL --local-dir ./models
+          hf download $env:HF_MODEL --local-dir ./models
 
       - name: Create volumes
         shell: pwsh
