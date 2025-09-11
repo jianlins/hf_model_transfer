@@ -26,6 +26,9 @@ on:
         type: string
 
 jobs:
+  permissions:
+    contents: write
+    
   download-gguf:
     runs-on: windows-latest
     
