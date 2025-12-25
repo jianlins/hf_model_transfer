@@ -114,22 +114,49 @@ jobs:
 
       - name: Get base name  
         id: get_base_name
+        shell: pwsh
         run: |
-          $OriginalName = (Get-ChildItem D:\models -Filter "${{ github.event.inputs.file_filter }}" | Where-Object { $_.Name -notmatch '-\d+-of-\d+\.gguf$' } | Select-Object -First 1).Name
-          if (-not $OriginalName) {
-            $OriginalName = (Get-ChildItem D:\models -Filter "*.gguf" | Select-Object -First 1).Name
+          # Try to find a matching file under UD-Q2_K_XL first
+          $file = Get-ChildItem -Path 'D:\models' -Recurse -File |
+            Where-Object { $_.FullName -like '*UD-Q2_K_XL*' } |
+            Where-Object { $_.Name -like '*1-of*' } |
+            Where-Object { $_.Name -notmatch '-\d+-of-\d+\.gguf$' } |
+            Select-Object -First 1
+
+          # Fallback: any .gguf file
+          if (-not $file) {
+            $file = Get-ChildItem -Path 'D:\models' -Recurse -File -Filter '*.gguf' |
+              Select-Object -First 1
+          }
+
+          if (-not $file) {
+            Write-Error "No .gguf file found in D:\models"
+            exit 1
+          }
+
+          $OriginalName = $file.Name
+
+          if ($OriginalName -match '-\d+-of-\d+\.gguf$') {
             $BASE_NAME = $OriginalName -replace '-\d+-of-\d+\.gguf$', '.gguf'
           } else {
             $BASE_NAME = $OriginalName
           }
+
           if ($BASE_NAME.StartsWith('wen')) {
             $BASE_NAME = 'q' + $BASE_NAME
           }
 
+          # Tag-safe base (no extension, no illegal chars)
           $TagBase = [System.IO.Path]::GetFileNameWithoutExtension($BASE_NAME)
           $TagBase = $TagBase -replace '[^0-9A-Za-z._-]', '-'
-          echo "base_name=$BASE_NAME"
+
+          Write-Host "Detected file: $($file.FullName)"
+          Write-Host "OriginalName: $OriginalName"
+          Write-Host "BASE_NAME: $BASE_NAME"
+          Write-Host "TagBase: $TagBase"
+
           echo "base_name=$TagBase" >> $env:GITHUB_OUTPUT
+
           
 
       - name: Merge split files
