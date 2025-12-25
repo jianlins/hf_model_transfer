@@ -125,8 +125,12 @@ jobs:
           if ($BASE_NAME.StartsWith('wen')) {
             $BASE_NAME = 'q' + $BASE_NAME
           }
+
+          $TagBase = [System.IO.Path]::GetFileNameWithoutExtension($BASE_NAME)
+          $TagBase = $TagBase -replace '[^0-9A-Za-z._-]', '-'
           echo "base_name=$BASE_NAME"
-          echo "base_name=$BASE_NAME" >> $env:GITHUB_OUTPUT
+          echo "base_name=$TagBase" >> $env:GITHUB_OUTPUT
+          
 
       - name: Merge split files
         if: ${{ github.event.inputs.merge_gguf == 'true' }}
