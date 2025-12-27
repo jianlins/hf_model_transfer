@@ -112,50 +112,59 @@ jobs:
           mkdir D:\models
           hf download ${{ github.event.inputs.model_name }} --include "${{ github.event.inputs.file_filter }}" --local-dir D:\models
 
-      - name: Get base name  
+      - name: Get base name
         id: get_base_name
         shell: pwsh
         run: |
           # Try to find a matching file under UD-Q2_K_XL first
-          $file = Get-ChildItem -Path 'D:\models' -Recurse -File |
-            Where-Object { $_.FullName -like '*UD-Q2_K_XL*' } |
-            Where-Object { $_.Name -like '*1-of*' } |
-            Where-Object { $_.Name -notmatch '-\d+-of-\d+\.gguf$' } |
-            Select-Object -First 1
+          $ggufFiles = Get-ChildItem -Path 'D:\models' -Recurse -File -Filter '*.gguf'
 
-          # Fallback: any .gguf file
-          if (-not $file) {
-            $file = Get-ChildItem -Path 'D:\models' -Recurse -File -Filter '*.gguf' |
-              Select-Object -First 1
-          }
-
-          if (-not $file) {
+          if (-not $ggufFiles -or $ggufFiles.Count -eq 0) {
             Write-Error "No .gguf file found in D:\models"
             exit 1
           }
 
-          $OriginalName = $file.Name
+          if ($ggufFiles.Count -gt 1) {
+            # Multiple gguf files: keep extension, clean split suffix
+            $file = $ggufFiles |
+              Where-Object { $_.FullName -like '*UD-Q2_K_XL*' } |
+              Where-Object { $_.Name -like '*1-of*' } |
+              Where-Object { $_.Name -notmatch '-\d+-of-\d+\.gguf$' } |
+              Select-Object -First 1
 
-          if ($OriginalName -match '-\d+-of-\d+\.gguf$') {
+            if (-not $file) {
+              $file = $ggufFiles | Select-Object -First 1
+            }
+
+            $OriginalName = $file.Name
             $BASE_NAME = $OriginalName -replace '-\d+-of-\d+\.gguf$', '.gguf'
-          } else {
-            $BASE_NAME = $OriginalName
+            # Tag-safe base (remove extension)
+            $TagBase = [System.IO.Path]::GetFileNameWithoutExtension($BASE_NAME)
+          }
+          else {
+            # Single gguf file: use filename without extension as basename
+            $file = $ggufFiles[0]
+            $OriginalName = $file.Name
+            $TagBase = [System.IO.Path]::GetFileNameWithoutExtension($OriginalName)
+            # For compatibility with later steps that expect BASE_NAME with extension
+            $BASE_NAME = "$TagBase.gguf"
           }
 
-          if ($BASE_NAME.StartsWith('wen')) {
+          if ($TagBase.StartsWith('wen')) {
+            $TagBase = 'q' + $TagBase
             $BASE_NAME = 'q' + $BASE_NAME
           }
 
-          # Tag-safe base (no extension, no illegal chars)
-          $TagBase = [System.IO.Path]::GetFileNameWithoutExtension($BASE_NAME)
+          # Tag-safe base: no illegal chars
           $TagBase = $TagBase -replace '[^0-9A-Za-z._-]', '-'
 
           Write-Host "Detected file: $($file.FullName)"
           Write-Host "OriginalName: $OriginalName"
           Write-Host "BASE_NAME: $BASE_NAME"
-          Write-Host "TagBase: $TagBase"
+          Write-Host "TagBase (output): $TagBase"
 
           echo "base_name=$TagBase" >> $env:GITHUB_OUTPUT
+
 
           
 
