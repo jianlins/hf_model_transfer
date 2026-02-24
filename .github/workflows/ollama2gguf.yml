@@ -84,14 +84,16 @@ jobs:
           Get-Process ollama* -ErrorAction SilentlyContinue |
             Stop-Process -Force -ErrorAction SilentlyContinue
 
-          $log = Join-Path $env:GITHUB_WORKSPACE "ollama-serve.log"
+          $logOut = Join-Path $env:GITHUB_WORKSPACE "ollama-serve-stdout.log"
+          $logErr = Join-Path $env:GITHUB_WORKSPACE "ollama-serve-stderr.log"
+
           $p = Start-Process -FilePath "ollama" -ArgumentList "serve" -PassThru `
-               -RedirectStandardOutput $log -RedirectStandardError $log
+              -RedirectStandardOutput $logOut -RedirectStandardError $logErr
 
           Start-Sleep -Seconds 1
           if ($p.HasExited) {
             Write-Error "ollama serve exited early (code $($p.ExitCode))"
-            Get-Content $log -ErrorAction SilentlyContinue | Select-Object -Last 50
+            Get-Content $logOut, $logErr -ErrorAction SilentlyContinue | Select-Object -Last 50
             exit 1
           }
 
@@ -110,9 +112,10 @@ jobs:
           }
           if (-not $ready) {
             Write-Error "Ollama server failed to become ready in time."
-            Get-Content $log -ErrorAction SilentlyContinue | Select-Object -Last 50
+            Get-Content $logOut, $logErr -ErrorAction SilentlyContinue | Select-Object -Last 50
             exit 1
           }
+
 
       - name: Pull model from Ollama registry
         env:
