@@ -8,7 +8,6 @@ on:
         required: true
         type: string
         default: "qwen3-embedding:4b"
-      # gguf_outtype removed — quantization is detected automatically from the model
 
 jobs:
   convert-and-release:
@@ -32,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Install Python
         uses: actions/setup-python@v5
@@ -48,6 +47,14 @@ jobs:
           } else {
             python -m pip install gguf
           }
+
+      - name: Download OllamaToGGUF.py
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Invoke-WebRequest `
+            -Uri "https://raw.githubusercontent.com/casual-drivel/OllamaToGGUF-MemoryFix/refs/heads/main/OllamaToGGUF.py" `
+            -OutFile "OllamaToGGUF.py"
+          Write-Host "Downloaded OllamaToGGUF.py"
 
       - name: Ensure Ollama models directory exists
         run: |
@@ -116,7 +123,6 @@ jobs:
             exit 1
           }
 
-
       - name: Pull model from Ollama registry
         env:
           MODEL_NAME: ${{ inputs.model_name }}
@@ -126,7 +132,6 @@ jobs:
           ollama pull "$env:MODEL_NAME"
           ollama ls
 
-      # ── NEW: ask Ollama's API what quantization level the pulled model has ──
       - name: Detect model quantization level
         id: detect_quant
         env:
@@ -140,7 +145,6 @@ jobs:
                     -ContentType "application/json" `
                     -Body $body
 
-          # details.quantization_level is e.g. "Q4_K_M", "Q8_0", "F16"
           $quant = $info.details.quantization_level
 
           if ([string]::IsNullOrWhiteSpace($quant)) {
@@ -148,21 +152,10 @@ jobs:
             $quant = "unknown"
           }
 
-          # Normalize to lowercase for filenames/tags (e.g. Q4_K_M -> q4_k_m)
           $quantLower = $quant.ToLowerInvariant()
-
           Write-Host "Detected quantization: $quant"
 
           "GGUF_OUTTYPE=$quantLower" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
-      - name: Inspect Ollama model storage
-        run: |
-          if (Test-Path "$env:OLLAMA_MODELS") {
-            Get-ChildItem -Recurse "$env:OLLAMA_MODELS" |
-              Select-Object FullName, Length | Format-List
-          } else {
-            Write-Warning "Models directory not found."
-          }
 
       - name: Derive model id, tag and slug
         id: model_parts
@@ -174,14 +167,13 @@ jobs:
 
           if ($full -like "*:*") {
             $parts = $full.Split(":", 2)
-            $modelId = $parts[0]
+            $modelId  = $parts[0]
             $modelTag = $parts[1]
           } else {
-            $modelId = $full
+            $modelId  = $full
             $modelTag = "latest"
           }
 
-          # Normalize slug: lowercase, replace :, /, whitespace → -, strip rest
           $slug = $full.ToLowerInvariant()
           $slug = $slug -replace "[:/\s]+", "-"
           $slug = $slug -replace "[^a-z0-9._-]", "-"
@@ -191,50 +183,27 @@ jobs:
           "MODEL_TAG=$modelTag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MODEL_SLUG=$slug"    | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Extract (and merge if sharded) GGUF from Ollama blob cache
+      - name: Convert Ollama model to GGUF via OllamaToGGUF.py
         env:
           MODEL_NAME: ${{ inputs.model_name }}
         run: |
           $ErrorActionPreference = 'Stop'
           $outFile = "model-$env:MODEL_ID-$env:MODEL_TAG-$env:GGUF_OUTTYPE.gguf"
 
-          $modelfile = ollama show --modelfile "$env:MODEL_NAME"
-          Write-Host "Modelfile:`n$modelfile"
+          # OllamaToGGUF.py reads Ollama's manifest + blobs directly.
+          # Pass OLLAMA_MODELS so it finds models in the workspace cache dir.
+          $env:OLLAMA_MODELS = "$env:OLLAMA_MODELS"
 
-          # Fix: split on CRLF or LF, trim carriage returns before matching
-          $fromLines = ($modelfile -split "`r?`n") |
-            ForEach-Object { $_.TrimEnd("`r").Trim() } |
-            Where-Object { $_ -match '^\s*FROM\s+([A-Za-z]:|/)' } |
-            ForEach-Object { ($_ -replace '^\s*FROM\s+', '').Trim() }
+          Write-Host "Running OllamaToGGUF.py for '$env:MODEL_NAME' -> '$outFile'"
+          python OllamaToGGUF.py "$env:MODEL_NAME" "$outFile"
 
-          if (-not $fromLines) {
-            Write-Error "No blob FROM lines found in modelfile."
+          if (-not (Test-Path $outFile)) {
+            Write-Error "OllamaToGGUF.py did not produce '$outFile'."
             exit 1
-          }
-
-          Write-Host "Found $($fromLines.Count) blob(s)."
-
-          if ($fromLines.Count -eq 1) {
-            $blobPath = $fromLines[0]
-            # Read only 4 bytes for magic check (efficient for large files)
-            $bytes = New-Object byte[] 4
-            $fs = [System.IO.File]::OpenRead($blobPath)
-            $fs.Read($bytes, 0, 4) | Out-Null
-            $fs.Close()
-            $magic = [System.Text.Encoding]::ASCII.GetString($bytes)
-            if ($magic -ne "GGUF") {
-              Write-Error "Blob '$blobPath' is not a GGUF file (magic: '$magic')."
-              exit 1
-            }
-            Copy-Item -Path $blobPath -Destination $outFile
-            Write-Host "Copied single GGUF blob to $outFile"
-          } else {
-            # ... sharded merge logic unchanged ...
           }
 
           "GGUF_FILE=$outFile" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Get-Item $outFile | Format-List
-
 
       - name: Compute SHA256 checksum
         run: |
@@ -248,7 +217,6 @@ jobs:
       - name: Create or update release
         uses: softprops/action-gh-release@v2
         with:
-          # Tag includes detected quant so each quantization gets its own release
           tag_name: ollama-${{ env.MODEL_SLUG }}-${{ env.GGUF_OUTTYPE }}
           target_commitish: ${{ github.sha }}
           name: "GGUF for ${{ inputs.model_name }} (${{ env.GGUF_OUTTYPE }})"
