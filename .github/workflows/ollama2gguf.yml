@@ -48,13 +48,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           python -m pip install --upgrade pip
-          # Adjust this to match your repo (requirements.txt, pyproject, etc.)
           if (Test-Path "requirements.txt") {
-            pip install -r requirements.txt
+            python -m pip install -r requirements.txt
           } else {
             # Minimal default: install gguf tooling if needed
-            pip install gguf -ErrorAction SilentlyContinue
+            python -m pip install gguf -ErrorAction SilentlyContinue
           }
+
 
       - name: Ensure Ollama models directory exists
         run: |
