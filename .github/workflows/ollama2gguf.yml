@@ -1,4 +1,4 @@
-name: ollama-to-gguf
+name: ollama-model-to-gguf
 
 on:
   workflow_dispatch:
@@ -12,11 +12,6 @@ on:
         required: true
         type: string
         default: "q4_0"
-      release_tag:
-        description: "Git tag / Release tag"
-        required: true
-        type: string
-        default: "ollama-gguf"
 
 jobs:
   convert-and-release:
@@ -29,31 +24,66 @@ jobs:
       run:
         shell: pwsh
 
+    # Prefer forward slashes; GitHub and PowerShell handle this fine on Windows
     env:
-      # Ollama docs: OLLAMA_MODELS is the models directory (default ~/.ollama/models).[web:1][web:2]
-      OLLAMA_MODELS: ${{ github.workspace }}\.ollama\models
+      OLLAMA_MODELS: ${{ github.workspace }}/.ollama/models
+
+    # Prevent two runs on the same model_name from racing
+    concurrency:
+      group: ollama-gguf-${{ inputs.model_name }}
+      cancel-in-progress: false
+
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v5  # current major as per upstream repo.[web:111]
+        uses: actions/checkout@v5  # v5 is valid and current [web:31]
 
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.11"  # Valid usage per docs [web:8][web:14]
+
+      - name: Install Python dependencies
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install --upgrade pip
+          # Adjust this to match your repo (requirements.txt, pyproject, etc.)
+          if (Test-Path "requirements.txt") {
+            pip install -r requirements.txt
+          } else {
+            # Minimal default: install gguf tooling if needed
+            pip install gguf -ErrorAction SilentlyContinue
+          }
 
       - name: Ensure Ollama models directory exists
         run: |
+          $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path "$env:OLLAMA_MODELS" | Out-Null
-          "OLLAMA_MODELS=$env:OLLAMA_MODELS" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          # No need to re-export; env is already set at job level
 
       - name: Install Ollama (Windows via winget)
         run: |
-          # Non‑interactive install to avoid prompts in CI.[web:47]
-          winget install -e --id Ollama.Ollama --source winget `
-            --accept-package-agreements --accept-source-agreements --disable-interactivity
+          $ErrorActionPreference = 'Stop'
 
-          # Make sure current and later steps see the ollama binary.[web:56]
+          # Simple retry wrapper for flaky winget
+          $maxTries = 3
+          for ($t = 1; $t -le $maxTries; $t++) {
+            try {
+              winget install -e --id Ollama.Ollama --source winget `
+                --accept-package-agreements --accept-source-agreements --disable-interactivity
+              break
+            } catch {
+              if ($t -eq $maxTries) {
+                Write-Error "winget install Ollama.Ollama failed after $maxTries attempts."
+                throw
+              }
+              Write-Host "winget install failed (attempt $t). Retrying..."
+              Start-Sleep -Seconds 5
+            }
+          }
+
+          # Make ollama available in PATH for current + later steps
           $ollamaDir = "$env:LOCALAPPDATA\Programs\Ollama"
           if (Test-Path $ollamaDir) {
             "$ollamaDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -64,17 +94,33 @@ jobs:
 
       - name: Start Ollama server
         run: |
-          # Kill any auto-started instance from the installer to avoid port and env conflicts.[web:139]
+          $ErrorActionPreference = 'Stop'
+
+          # Kill any existing Ollama processes to avoid port/env conflicts
           Get-Process ollama* -ErrorAction SilentlyContinue |
             Stop-Process -Force -ErrorAction SilentlyContinue
 
-          Start-Process -FilePath "ollama" -ArgumentList "serve" -NoNewWindow
+          $log = Join-Path $env:GITHUB_WORKSPACE "ollama-serve.log"
 
-          # Wait for HTTP API readiness on localhost:11434 (documented default).[web:2][web:90]
+          # Start server in background and capture output
+          $p = Start-Process -FilePath "ollama" -ArgumentList "serve" -PassThru `
+               -RedirectStandardOutput $log -RedirectStandardError $log
+
+          Start-Sleep -Seconds 1
+          if ($p.HasExited) {
+            Write-Error "ollama serve exited early with code $($p.ExitCode)"
+            if (Test-Path $log) {
+              Write-Host "==== ollama-serve.log ===="
+              Get-Content $log | Select-Object -Last 200
+            }
+            exit 1
+          }
+
+          # Wait for HTTP API readiness on localhost:11434
           $ready = $false
           for ($i = 0; $i -lt 60; $i++) {
             try {
-              Invoke-WebRequest -Uri "http://localhost:11434/api/tags" `
+              Invoke-RestMethod -Uri "http://localhost:11434/api/tags" `
                 -Method GET -TimeoutSec 2 -ErrorAction Stop | Out-Null
               Write-Host "Ollama API is up."
               $ready = $true
@@ -86,6 +132,10 @@ jobs:
           }
           if (-not $ready) {
             Write-Error "Ollama server failed to become ready in time."
+            if (Test-Path $log) {
+              Write-Host "==== ollama-serve.log ===="
+              Get-Content $log | Select-Object -Last 200
+            }
             exit 1
           }
 
@@ -93,57 +143,108 @@ jobs:
         env:
           MODEL_NAME: ${{ inputs.model_name }}
         run: |
+          $ErrorActionPreference = 'Stop'
           Write-Host "Pulling $env:MODEL_NAME ..."
           ollama pull "$env:MODEL_NAME"
           Write-Host "Installed models:"
-          # CLI docs use 'ollama ls' to list models.[web:4]
           ollama ls
 
       - name: Inspect Ollama model storage
         run: |
+          $ErrorActionPreference = 'Stop'
           Write-Host "OLLAMA_MODELS = $env:OLLAMA_MODELS"
           if (Test-Path "$env:OLLAMA_MODELS") {
-            Get-ChildItem -Recurse "$env:OLLAMA_MODELS" | Format-Table FullName, Length
+            Get-ChildItem -Recurse "$env:OLLAMA_MODELS" |
+              Select-Object FullName, Length |
+              Format-List
           } else {
             Write-Warning "Models directory not found."
           }
+
+      # Derive model id, tag and a safe slug for tags / filenames
+      - name: Derive model id, tag and slug
+        id: model_parts
+        env:
+          MODEL_NAME_INPUT: ${{ inputs.model_name }}  # avoid direct interpolation
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Read user input from env to avoid script injection
+          $full = $env:MODEL_NAME_INPUT
+
+          if ($full -like "*:*") {
+            $parts = $full.Split(":", 2)
+            $modelId = $parts[0]
+            $modelTag = $parts[1]
+          } else {
+            $modelId = $full
+            $modelTag = "latest"
+          }
+
+          # Safe slug for git tags and filenames:
+          #  - lowercase
+          #  - replace :, /, whitespace with -
+          #  - strip any remaining weird chars to [a-z0-9._-]
+          $slug = $full.ToLowerInvariant()
+          $slug = $slug -replace "[:/\\s]+", "-"
+          $slug = $slug -replace "[^a-z0-9._-]", "-"
+          $slug = $slug.Trim("-")
+
+          "MODEL_ID=$modelId"   | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MODEL_TAG=$modelTag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MODEL_SLUG=$slug"    | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Extract GGUF from Ollama cache
         env:
           MODEL_NAME: ${{ inputs.model_name }}
           GGUF_OUTTYPE: ${{ inputs.gguf_outtype }}
         run: |
-          # This script should read the manifest under:
-          #   $OLLAMA_MODELS\manifests\registry.ollama.ai\library\<model>\<tag>
-          # find the 'application/vnd.ollama.image.model' layer, then copy the
-          # corresponding blob from $OLLAMA_MODELS\blobs\sha256-... to the output path.[web:35][web:74]
+          $ErrorActionPreference = 'Stop'
+
+          $outFile = "model-$env:MODEL_ID-$env:MODEL_TAG-$env:GGUF_OUTTYPE.gguf"
+
           python scripts/convert_ollama_to_gguf.py `
             --ollama-models "$env:OLLAMA_MODELS" `
             --model "$env:MODEL_NAME" `
             --outtype "$env:GGUF_OUTTYPE" `
-            --output "model-$env:GGUF_OUTTYPE.gguf"
+            --output $outFile
 
-          Get-ChildItem model-*.gguf | Format-List
+          if (-not (Test-Path $outFile)) {
+            Write-Error "Expected GGUF file '$outFile' was not created."
+            exit 1
+          }
+
+          "GGUF_FILE=$outFile" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          Get-Item $outFile | Format-List
 
       - name: Compute SHA256 checksum
         run: |
-          Get-FileHash model-*.gguf -Algorithm SHA256 |
+          $ErrorActionPreference = 'Stop'
+
+          if (-not (Test-Path $env:GGUF_FILE)) {
+            Write-Error "GGUF file '$env:GGUF_FILE' not found for checksum."
+            exit 1
+          }
+
+          Get-FileHash "$env:GGUF_FILE" -Algorithm SHA256 |
             ForEach-Object {
               "$($_.Hash.ToLower())  $($_.Path | Split-Path -Leaf)"
-            } | Out-File -Encoding ascii model-gguf.sha256
+            } | Out-File -Encoding utf8 model-gguf.sha256
 
           Get-Content model-gguf.sha256
 
       - name: Create or update release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2  # Supported and cross-platform [web:16]
         with:
-          tag_name: ${{ inputs.release_tag }}
-          # GitHub Releases API requires target_commitish when creating a new tag.[web:149][web:7]
+          # e.g. model_name=phi3:mini -> tag=ollama-phi3-mini
+          # If you want per-quantization releases, append -${{ inputs.gguf_outtype }} here.
+          tag_name: ollama-${{ env.MODEL_SLUG }}
           target_commitish: ${{ github.sha }}
           name: "GGUF for ${{ inputs.model_name }}"
           fail_on_unmatched_files: true
           files: |
-            model-*.gguf
+            ${{ env.GGUF_FILE }}
             model-gguf.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
