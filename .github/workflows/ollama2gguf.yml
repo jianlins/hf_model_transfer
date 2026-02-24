@@ -8,6 +8,11 @@ on:
         required: true
         type: string
         default: "qwen3-embedding:4b"
+      split_size:
+        description: "7zip volume size in MB (default 800 to stay under GitHub 2 GiB limit)"
+        required: false
+        type: string
+        default: "800"
 
 jobs:
   convert-and-release:
@@ -45,6 +50,20 @@ jobs:
             python -m pip install gguf
           }
 
+      - name: Install 7zip
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install 7zip -y
+          # Ensure 7z is on PATH for subsequent steps
+          $sevenZipDir = "C:\Program Files\7-Zip"
+          if (Test-Path $sevenZipDir) {
+            "$sevenZipDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            $env:PATH = "$sevenZipDir;$env:PATH"
+          }
+          7z i | Select-Object -First 2
+        env:
+          ChocolateyInstall: "C:\\ProgramData\\chocolatey"
+
       - name: Install Ollama (Windows via winget)
         run: |
           $ErrorActionPreference = 'Stop'
@@ -75,8 +94,8 @@ jobs:
           Get-Process ollama* -ErrorAction SilentlyContinue |
             Stop-Process -Force -ErrorAction SilentlyContinue
 
-          # Do NOT set OLLAMA_MODELS — let Ollama use its default user-profile path
-          # so that OllamaToGGUF.py can find blobs in the same place ollama pull wrote them.
+          # Do NOT set a custom OLLAMA_MODELS — use the default user-profile path
+          # so OllamaToGGUF.py finds blobs in the same place ollama pull wrote them.
           Remove-Item Env:OLLAMA_MODELS -ErrorAction SilentlyContinue
 
           $logOut = Join-Path $env:GITHUB_WORKSPACE "ollama-serve-stdout.log"
@@ -183,8 +202,6 @@ jobs:
           Write-Host "OLLAMA_MODELS = $env:OLLAMA_MODELS"
           Write-Host "Running OllamaToGGUF.py for '$env:MODEL_NAME' -> '$outFile'"
 
-          # argv[1] = model name  (triggers non-interactive mode)
-          # argv[2] = output path (written directly here, no Output\ subdir needed)
           python OllamaToGGUF.py "$env:MODEL_NAME" "$outFile"
 
           if (-not (Test-Path $outFile)) {
@@ -207,15 +224,139 @@ jobs:
             } | Out-File -Encoding utf8 model-gguf.sha256
           Get-Content model-gguf.sha256
 
-      - name: Create or update release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ollama-${{ env.MODEL_SLUG }}-${{ env.GGUF_OUTTYPE }}
-          target_commitish: ${{ github.sha }}
-          name: "GGUF for ${{ inputs.model_name }} (${{ env.GGUF_OUTTYPE }})"
-          fail_on_unmatched_files: true
-          files: |
-            ${{ env.GGUF_FILE }}
-            model-gguf.sha256
+      - name: Split GGUF into volumes with 7zip
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $splitMB  = "${{ inputs.split_size }}"
+          $archive  = "volumes\$env:MODEL_SLUG-$env:GGUF_OUTTYPE.7z"
+
+          New-Item -ItemType Directory -Force -Path "volumes" | Out-Null
+
+          Write-Host "Splitting '$env:GGUF_FILE' into ${splitMB}MB volumes -> $archive"
+          7z a -v${splitMB}m "$archive" "$env:GGUF_FILE" "model-gguf.sha256"
+
+          Write-Host "`n--- Volume listing ---"
+          Get-ChildItem volumes | Select-Object Name, @{N='MB';E={[math]::Round($_.Length/1MB,1)}}
+
+          # Count volumes produced
+          $count = (Get-ChildItem volumes).Count
+          Write-Host "Total volume files: $count"
+          "VOLUME_COUNT=$count" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Create GitHub release
+        id: create_release
+        uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ollama-${{ env.MODEL_SLUG }}-${{ env.GGUF_OUTTYPE }}
+          release_name: "GGUF for ${{ inputs.model_name }} (${{ env.GGUF_OUTTYPE }})"
+          draft: false
+          prerelease: false
+          body: |
+            ## ${{ inputs.model_name }} — ${{ env.GGUF_OUTTYPE }} GGUF
+
+            | Field | Value |
+            |---|---|
+            | Ollama model | `${{ inputs.model_name }}` |
+            | Quantization | `${{ env.GGUF_OUTTYPE }}` |
+            | Archive format | 7zip split volumes (`${{ inputs.split_size }} MB` each) |
+            | Volume count | ${{ env.VOLUME_COUNT }} files |
+
+            ### How to reassemble
+            Download **all** `.7z.*` volume files plus `model-gguf.sha256`, then run:
+            ```bash
+            # Linux / macOS
+            7z x <archive>.7z.001
+
+            # Windows
+            7z x <archive>.7z.001
+            ```
+            Verify integrity with the included SHA256 checksum file.
+
+      - name: Upload volumes to release (batch 1 — files 1–38)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs   = require('fs');
+            const path = require('path');
+
+            const releaseId = '${{ steps.create_release.outputs.id }}';
+            const volDir    = 'D:/volumes';   // absolute path for reliability
+
+            // Re-read from workspace-relative path if D:/volumes not populated
+            const dir = fs.existsSync(volDir) ? volDir : path.join(process.env.GITHUB_WORKSPACE, 'volumes');
+            const files = fs.readdirSync(dir).sort();
+            const batch = files.slice(0, 38);
+
+            console.log(`Uploading batch 1: ${batch.length} file(s)`);
+            for (const file of batch) {
+              const filePath = path.join(dir, file);
+              console.log(`  Uploading: ${file} (${(fs.statSync(filePath).size / 1e6).toFixed(1)} MB)`);
+              await github.rest.repos.uploadReleaseAsset({
+                owner:      context.repo.owner,
+                repo:       context.repo.repo,
+                release_id: releaseId,
+                name:       file,
+                data:       fs.readFileSync(filePath),
+              });
+            }
+
+      - name: Upload volumes to release (batch 2 — files 39–76)
+        if: env.VOLUME_COUNT > 38
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs   = require('fs');
+            const path = require('path');
+
+            const releaseId = '${{ steps.create_release.outputs.id }}';
+            const volDir    = 'D:/volumes';
+            const dir = fs.existsSync(volDir) ? volDir : path.join(process.env.GITHUB_WORKSPACE, 'volumes');
+            const files = fs.readdirSync(dir).sort();
+            const batch = files.slice(38, 76);
+
+            if (batch.length === 0) { console.log('No files for batch 2.'); return; }
+            console.log(`Uploading batch 2: ${batch.length} file(s)`);
+            for (const file of batch) {
+              const filePath = path.join(dir, file);
+              console.log(`  Uploading: ${file}`);
+              await github.rest.repos.uploadReleaseAsset({
+                owner:      context.repo.owner,
+                repo:       context.repo.repo,
+                release_id: releaseId,
+                name:       file,
+                data:       fs.readFileSync(filePath),
+              });
+            }
+
+      - name: Upload volumes to release (batch 3 — files 77+)
+        if: env.VOLUME_COUNT > 76
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs   = require('fs');
+            const path = require('path');
+
+            const releaseId = '${{ steps.create_release.outputs.id }}';
+            const volDir    = 'D:/volumes';
+            const dir = fs.existsSync(volDir) ? volDir : path.join(process.env.GITHUB_WORKSPACE, 'volumes');
+            const files = fs.readdirSync(dir).sort();
+            const batch = files.slice(76);
+
+            if (batch.length === 0) { console.log('No files for batch 3.'); return; }
+            console.log(`Uploading batch 3: ${batch.length} file(s)`);
+            for (const file of batch) {
+              const filePath = path.join(dir, file);
+              console.log(`  Uploading: ${file}`);
+              await github.rest.repos.uploadReleaseAsset({
+                owner:      context.repo.owner,
+                repo:       context.repo.repo,
+                release_id: releaseId,
+                name:       file,
+                data:       fs.readFileSync(filePath),
+              });
+            }
