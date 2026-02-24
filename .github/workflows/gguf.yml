@@ -243,7 +243,7 @@ jobs:
         with:
           tag_name: ollama-${{ env.MODEL_SLUG }}-${{ env.GGUF_OUTTYPE }}
           target_commitish: ${{ github.sha }}
-          name: "GGUF for ${{ inputs.model_name }} (${{ env.GGUF_OUTTYPE }})"
+          name: "GGUF for Ollama ${{ inputs.model_name }} (${{ env.GGUF_OUTTYPE }})"
           fail_on_unmatched_files: true
           body: |
             ## ${{ inputs.model_name }} — ${{ env.GGUF_OUTTYPE }} GGUF
