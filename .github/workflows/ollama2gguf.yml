@@ -1,0 +1,149 @@
+name: ollama-to-gguf
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_name:
+        description: "Ollama model name (e.g. phi3:mini, llama3.2:latest)"
+        required: true
+        type: string
+      gguf_outtype:
+        description: "Label for GGUF output filename (e.g. q4_0, q5_1, q8_0)"
+        required: true
+        type: string
+        default: "q4_0"
+      release_tag:
+        description: "Git tag / Release tag"
+        required: true
+        type: string
+        default: "ollama-gguf"
+
+jobs:
+  convert-and-release:
+    runs-on: windows-latest
+
+    permissions:
+      contents: write
+
+    defaults:
+      run:
+        shell: pwsh
+
+    env:
+      # Ollama docs: OLLAMA_MODELS is the models directory (default ~/.ollama/models).[web:1][web:2]
+      OLLAMA_MODELS: ${{ github.workspace }}\.ollama\models
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v5  # current major as per upstream repo.[web:111]
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Ensure Ollama models directory exists
+        run: |
+          New-Item -ItemType Directory -Force -Path "$env:OLLAMA_MODELS" | Out-Null
+          "OLLAMA_MODELS=$env:OLLAMA_MODELS" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install Ollama (Windows via winget)
+        run: |
+          # Non‑interactive install to avoid prompts in CI.[web:47]
+          winget install -e --id Ollama.Ollama --source winget `
+            --accept-package-agreements --accept-source-agreements --disable-interactivity
+
+          # Make sure current and later steps see the ollama binary.[web:56]
+          $ollamaDir = "$env:LOCALAPPDATA\Programs\Ollama"
+          if (Test-Path $ollamaDir) {
+            "$ollamaDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            $env:PATH = "$ollamaDir;$env:PATH"
+          }
+
+          ollama --version
+
+      - name: Start Ollama server
+        run: |
+          # Kill any auto-started instance from the installer to avoid port and env conflicts.[web:139]
+          Get-Process ollama* -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+
+          Start-Process -FilePath "ollama" -ArgumentList "serve" -NoNewWindow
+
+          # Wait for HTTP API readiness on localhost:11434 (documented default).[web:2][web:90]
+          $ready = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try {
+              Invoke-WebRequest -Uri "http://localhost:11434/api/tags" `
+                -Method GET -TimeoutSec 2 -ErrorAction Stop | Out-Null
+              Write-Host "Ollama API is up."
+              $ready = $true
+              break
+            } catch {
+              Write-Host "Waiting for Ollama server... ($i)"
+              Start-Sleep -Seconds 1
+            }
+          }
+          if (-not $ready) {
+            Write-Error "Ollama server failed to become ready in time."
+            exit 1
+          }
+
+      - name: Pull model from Ollama registry
+        env:
+          MODEL_NAME: ${{ inputs.model_name }}
+        run: |
+          Write-Host "Pulling $env:MODEL_NAME ..."
+          ollama pull "$env:MODEL_NAME"
+          Write-Host "Installed models:"
+          # CLI docs use 'ollama ls' to list models.[web:4]
+          ollama ls
+
+      - name: Inspect Ollama model storage
+        run: |
+          Write-Host "OLLAMA_MODELS = $env:OLLAMA_MODELS"
+          if (Test-Path "$env:OLLAMA_MODELS") {
+            Get-ChildItem -Recurse "$env:OLLAMA_MODELS" | Format-Table FullName, Length
+          } else {
+            Write-Warning "Models directory not found."
+          }
+
+      - name: Extract GGUF from Ollama cache
+        env:
+          MODEL_NAME: ${{ inputs.model_name }}
+          GGUF_OUTTYPE: ${{ inputs.gguf_outtype }}
+        run: |
+          # This script should read the manifest under:
+          #   $OLLAMA_MODELS\manifests\registry.ollama.ai\library\<model>\<tag>
+          # find the 'application/vnd.ollama.image.model' layer, then copy the
+          # corresponding blob from $OLLAMA_MODELS\blobs\sha256-... to the output path.[web:35][web:74]
+          python scripts/convert_ollama_to_gguf.py `
+            --ollama-models "$env:OLLAMA_MODELS" `
+            --model "$env:MODEL_NAME" `
+            --outtype "$env:GGUF_OUTTYPE" `
+            --output "model-$env:GGUF_OUTTYPE.gguf"
+
+          Get-ChildItem model-*.gguf | Format-List
+
+      - name: Compute SHA256 checksum
+        run: |
+          Get-FileHash model-*.gguf -Algorithm SHA256 |
+            ForEach-Object {
+              "$($_.Hash.ToLower())  $($_.Path | Split-Path -Leaf)"
+            } | Out-File -Encoding ascii model-gguf.sha256
+
+          Get-Content model-gguf.sha256
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag }}
+          # GitHub Releases API requires target_commitish when creating a new tag.[web:149][web:7]
+          target_commitish: ${{ github.sha }}
+          name: "GGUF for ${{ inputs.model_name }}"
+          fail_on_unmatched_files: true
+          files: |
+            model-*.gguf
+            model-gguf.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

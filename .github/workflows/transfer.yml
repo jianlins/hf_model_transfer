@@ -13,6 +13,11 @@ on:
         required: false
         default: '800'
         type: string
+      hf_token:
+        descripton: 'hf login token to download non-public model'
+        required: falsed
+        default: ''
+        type: string
 
 jobs:
   archive-models:
