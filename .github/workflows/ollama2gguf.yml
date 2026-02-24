@@ -7,11 +7,7 @@ on:
         description: "Ollama model name (e.g. phi3:mini, llama3.2:latest)"
         required: true
         type: string
-      gguf_outtype:
-        description: "Label for GGUF output filename (e.g. q4_0, q5_1, q8_0)"
-        required: true
-        type: string
-        default: "q4_0"
+      # gguf_outtype removed — quantization is detected automatically from the model
 
 jobs:
   convert-and-release:
@@ -24,11 +20,9 @@ jobs:
       run:
         shell: pwsh
 
-    # Prefer forward slashes; GitHub and PowerShell handle this fine on Windows
     env:
       OLLAMA_MODELS: ${{ github.workspace }}/.ollama/models
 
-    # Prevent two runs on the same model_name from racing
     concurrency:
       group: ollama-gguf-${{ inputs.model_name }}
       cancel-in-progress: false
@@ -37,12 +31,12 @@ jobs:
 
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v5  # v5 is valid and current [web:31]
+        uses: actions/checkout@v5
 
       - name: Install Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"  # Valid usage per docs [web:8][web:14]
+          python-version: "3.11"
 
       - name: Install Python dependencies
         run: |
@@ -51,22 +45,17 @@ jobs:
           if (Test-Path "requirements.txt") {
             python -m pip install -r requirements.txt
           } else {
-            # Minimal default: install gguf tooling if needed
-            python -m pip install gguf -ErrorAction SilentlyContinue
+            python -m pip install gguf
           }
-
 
       - name: Ensure Ollama models directory exists
         run: |
           $ErrorActionPreference = 'Stop'
           New-Item -ItemType Directory -Force -Path "$env:OLLAMA_MODELS" | Out-Null
-          # No need to re-export; env is already set at job level
 
       - name: Install Ollama (Windows via winget)
         run: |
           $ErrorActionPreference = 'Stop'
-
-          # Simple retry wrapper for flaky winget
           $maxTries = 3
           for ($t = 1; $t -le $maxTries; $t++) {
             try {
@@ -74,16 +63,12 @@ jobs:
                 --accept-package-agreements --accept-source-agreements --disable-interactivity
               break
             } catch {
-              if ($t -eq $maxTries) {
-                Write-Error "winget install Ollama.Ollama failed after $maxTries attempts."
-                throw
-              }
-              Write-Host "winget install failed (attempt $t). Retrying..."
+              if ($t -eq $maxTries) { throw }
+              Write-Host "winget attempt $t failed. Retrying in 5s..."
               Start-Sleep -Seconds 5
             }
           }
 
-          # Make ollama available in PATH for current + later steps
           $ollamaDir = "$env:LOCALAPPDATA\Programs\Ollama"
           if (Test-Path $ollamaDir) {
             "$ollamaDir" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
@@ -95,28 +80,20 @@ jobs:
       - name: Start Ollama server
         run: |
           $ErrorActionPreference = 'Stop'
-
-          # Kill any existing Ollama processes to avoid port/env conflicts
           Get-Process ollama* -ErrorAction SilentlyContinue |
             Stop-Process -Force -ErrorAction SilentlyContinue
 
           $log = Join-Path $env:GITHUB_WORKSPACE "ollama-serve.log"
-
-          # Start server in background and capture output
           $p = Start-Process -FilePath "ollama" -ArgumentList "serve" -PassThru `
                -RedirectStandardOutput $log -RedirectStandardError $log
 
           Start-Sleep -Seconds 1
           if ($p.HasExited) {
-            Write-Error "ollama serve exited early with code $($p.ExitCode)"
-            if (Test-Path $log) {
-              Write-Host "==== ollama-serve.log ===="
-              Get-Content $log | Select-Object -Last 200
-            }
+            Write-Error "ollama serve exited early (code $($p.ExitCode))"
+            Get-Content $log -ErrorAction SilentlyContinue | Select-Object -Last 50
             exit 1
           }
 
-          # Wait for HTTP API readiness on localhost:11434
           $ready = $false
           for ($i = 0; $i -lt 60; $i++) {
             try {
@@ -132,10 +109,7 @@ jobs:
           }
           if (-not $ready) {
             Write-Error "Ollama server failed to become ready in time."
-            if (Test-Path $log) {
-              Write-Host "==== ollama-serve.log ===="
-              Get-Content $log | Select-Object -Last 200
-            }
+            Get-Content $log -ErrorAction SilentlyContinue | Select-Object -Last 50
             exit 1
           }
 
@@ -146,30 +120,52 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Write-Host "Pulling $env:MODEL_NAME ..."
           ollama pull "$env:MODEL_NAME"
-          Write-Host "Installed models:"
           ollama ls
+
+      # ── NEW: ask Ollama's API what quantization level the pulled model has ──
+      - name: Detect model quantization level
+        id: detect_quant
+        env:
+          MODEL_NAME: ${{ inputs.model_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $body = @{ model = $env:MODEL_NAME } | ConvertTo-Json
+          $info = Invoke-RestMethod -Uri "http://localhost:11434/api/show" `
+                    -Method POST `
+                    -ContentType "application/json" `
+                    -Body $body
+
+          # details.quantization_level is e.g. "Q4_K_M", "Q8_0", "F16"
+          $quant = $info.details.quantization_level
+
+          if ([string]::IsNullOrWhiteSpace($quant)) {
+            Write-Warning "quantization_level not found in API response; falling back to 'unknown'"
+            $quant = "unknown"
+          }
+
+          # Normalize to lowercase for filenames/tags (e.g. Q4_K_M -> q4_k_m)
+          $quantLower = $quant.ToLowerInvariant()
+
+          Write-Host "Detected quantization: $quant"
+
+          "GGUF_OUTTYPE=$quantLower" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Inspect Ollama model storage
         run: |
-          $ErrorActionPreference = 'Stop'
-          Write-Host "OLLAMA_MODELS = $env:OLLAMA_MODELS"
           if (Test-Path "$env:OLLAMA_MODELS") {
             Get-ChildItem -Recurse "$env:OLLAMA_MODELS" |
-              Select-Object FullName, Length |
-              Format-List
+              Select-Object FullName, Length | Format-List
           } else {
             Write-Warning "Models directory not found."
           }
 
-      # Derive model id, tag and a safe slug for tags / filenames
       - name: Derive model id, tag and slug
         id: model_parts
         env:
-          MODEL_NAME_INPUT: ${{ inputs.model_name }}  # avoid direct interpolation
+          MODEL_NAME_INPUT: ${{ inputs.model_name }}
         run: |
           $ErrorActionPreference = 'Stop'
-
-          # Read user input from env to avoid script injection
           $full = $env:MODEL_NAME_INPUT
 
           if ($full -like "*:*") {
@@ -181,12 +177,9 @@ jobs:
             $modelTag = "latest"
           }
 
-          # Safe slug for git tags and filenames:
-          #  - lowercase
-          #  - replace :, /, whitespace with -
-          #  - strip any remaining weird chars to [a-z0-9._-]
+          # Normalize slug: lowercase, replace :, /, whitespace → -, strip rest
           $slug = $full.ToLowerInvariant()
-          $slug = $slug -replace "[:/\\s]+", "-"
+          $slug = $slug -replace "[:/\s]+", "-"
           $slug = $slug -replace "[^a-z0-9._-]", "-"
           $slug = $slug.Trim("-")
 
@@ -197,10 +190,10 @@ jobs:
       - name: Extract GGUF from Ollama cache
         env:
           MODEL_NAME: ${{ inputs.model_name }}
-          GGUF_OUTTYPE: ${{ inputs.gguf_outtype }}
         run: |
           $ErrorActionPreference = 'Stop'
 
+          # GGUF_OUTTYPE is now the detected quantization (e.g. q4_k_m)
           $outFile = "model-$env:MODEL_ID-$env:MODEL_TAG-$env:GGUF_OUTTYPE.gguf"
 
           python scripts/convert_ollama_to_gguf.py `
@@ -210,38 +203,29 @@ jobs:
             --output $outFile
 
           if (-not (Test-Path $outFile)) {
-            Write-Error "Expected GGUF file '$outFile' was not created."
+            Write-Error "Expected GGUF file '$outFile' was not produced."
             exit 1
           }
 
           "GGUF_FILE=$outFile" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-
           Get-Item $outFile | Format-List
 
       - name: Compute SHA256 checksum
         run: |
           $ErrorActionPreference = 'Stop'
-
-          if (-not (Test-Path $env:GGUF_FILE)) {
-            Write-Error "GGUF file '$env:GGUF_FILE' not found for checksum."
-            exit 1
-          }
-
           Get-FileHash "$env:GGUF_FILE" -Algorithm SHA256 |
             ForEach-Object {
               "$($_.Hash.ToLower())  $($_.Path | Split-Path -Leaf)"
             } | Out-File -Encoding utf8 model-gguf.sha256
-
           Get-Content model-gguf.sha256
 
       - name: Create or update release
-        uses: softprops/action-gh-release@v2  # Supported and cross-platform [web:16]
+        uses: softprops/action-gh-release@v2
         with:
-          # e.g. model_name=phi3:mini -> tag=ollama-phi3-mini
-          # If you want per-quantization releases, append -${{ inputs.gguf_outtype }} here.
-          tag_name: ollama-${{ env.MODEL_SLUG }}
+          # Tag includes detected quant so each quantization gets its own release
+          tag_name: ollama-${{ env.MODEL_SLUG }}-${{ env.GGUF_OUTTYPE }}
           target_commitish: ${{ github.sha }}
-          name: "GGUF for ${{ inputs.model_name }}"
+          name: "GGUF for ${{ inputs.model_name }} (${{ env.GGUF_OUTTYPE }})"
           fail_on_unmatched_files: true
           files: |
             ${{ env.GGUF_FILE }}
