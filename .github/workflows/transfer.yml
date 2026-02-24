@@ -15,7 +15,7 @@ on:
         type: string
       hf_token:
         descripton: 'hf login token to download non-public model'
-        required: falsed
+        required: false
         default: ''
         type: string
 
