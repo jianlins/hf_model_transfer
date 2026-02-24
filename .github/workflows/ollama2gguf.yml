@@ -20,9 +20,6 @@ jobs:
       run:
         shell: pwsh
 
-    env:
-      OLLAMA_MODELS: ${{ github.workspace }}/.ollama/models
-
     concurrency:
       group: ollama-gguf-${{ inputs.model_name }}
       cancel-in-progress: false
@@ -56,11 +53,6 @@ jobs:
             -OutFile "OllamaToGGUF.py"
           Write-Host "Downloaded OllamaToGGUF.py"
 
-      - name: Ensure Ollama models directory exists
-        run: |
-          $ErrorActionPreference = 'Stop'
-          New-Item -ItemType Directory -Force -Path "$env:OLLAMA_MODELS" | Out-Null
-
       - name: Install Ollama (Windows via winget)
         run: |
           $ErrorActionPreference = 'Stop'
@@ -90,6 +82,12 @@ jobs:
           $ErrorActionPreference = 'Stop'
           Get-Process ollama* -ErrorAction SilentlyContinue |
             Stop-Process -Force -ErrorAction SilentlyContinue
+
+          # ✅ FIX: Do NOT set a custom OLLAMA_MODELS — let Ollama use its
+          # default path (%USERPROFILE%\.ollama\models) so that OllamaToGGUF.py
+          # can find the manifests and blobs in the expected location.
+          # Remove any leftover OLLAMA_MODELS that might have been inherited.
+          Remove-Item Env:OLLAMA_MODELS -ErrorAction SilentlyContinue
 
           $logOut = Join-Path $env:GITHUB_WORKSPACE "ollama-serve-stdout.log"
           $logErr = Join-Path $env:GITHUB_WORKSPACE "ollama-serve-stderr.log"
@@ -190,10 +188,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $outFile = "model-$env:MODEL_ID-$env:MODEL_TAG-$env:GGUF_OUTTYPE.gguf"
 
-          # OllamaToGGUF.py reads Ollama's manifest + blobs directly.
-          # Pass OLLAMA_MODELS so it finds models in the workspace cache dir.
-          $env:OLLAMA_MODELS = "$env:OLLAMA_MODELS"
+          # ✅ FIX: Point OllamaToGGUF.py to the SAME default path Ollama used.
+          # This must match wherever `ollama pull` actually stored the blobs.
+          $env:OLLAMA_MODELS = "$env:USERPROFILE\.ollama\models"
 
+          Write-Host "OLLAMA_MODELS resolved to: $env:OLLAMA_MODELS"
           Write-Host "Running OllamaToGGUF.py for '$env:MODEL_NAME' -> '$outFile'"
           python OllamaToGGUF.py "$env:MODEL_NAME" "$outFile"
 
