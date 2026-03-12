@@ -261,6 +261,6 @@ jobs:
             7z x <archive>.7z.001
             ```
             Verify with the included `model-gguf.sha256` checksum file.
-          files: volumes/*
+          files: D:/volumes/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
