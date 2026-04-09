@@ -239,7 +239,7 @@ jobs:
         run: ls -l D:/volumes
 
       - name: Create release and upload volumes
-        uses: softprops/action-gh-release@v2.4.2
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: ollama-${{ env.MODEL_SLUG }}-${{ env.GGUF_OUTTYPE }}
           target_commitish: ${{ github.sha }}
