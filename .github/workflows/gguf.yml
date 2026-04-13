@@ -111,7 +111,7 @@ jobs:
           $raw = '${{ github.event.inputs.file_filter }}'
           $patterns = $raw -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' }
           $joined = $patterns -join '" --include "'
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "patterns=`"$joined`"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "patterns=$joined"
 
       - name: Download GGUF files
         env:
