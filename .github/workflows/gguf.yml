@@ -241,7 +241,7 @@ jobs:
         run: |        
           ls -l D:/models
           mkdir D:/volumes
-          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.BASE_NAME }}.7z" "D:\models\*${{ github.event.inputs.file_filter }}*gguf"
+          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.BASE_NAME }}.7z" "D:\models\*"
       
       - name: check zipped
         shell: bash
@@ -261,7 +261,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: gguf-${{ github.event.inputs.model_name }}-${{ steps.get_base_name.outputs.base_name }}
+          tag_name: gguf-${{ github.event.inputs.model_name }}-${{ steps.get_base_name.outputs.base_name }}-${{ github.run_id }}
           release_name: "GGUF for ${{ github.event.inputs.model_name }}"
           draft: false
           prerelease: false
