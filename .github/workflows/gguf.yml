@@ -228,20 +228,15 @@ jobs:
         
 
 
-      - name: 7zip merged file
-        if: ${{ github.event.inputs.merge_gguf == 'true' }}
-        shell: bash
+      - name: 7zip each file separately
+        shell: pwsh
         run: |
-          mkdir D:/volumes
-          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.BASE_NAME }}.7z" "D:\models\${{ steps.merge_files.outputs.TARGET_NAME }}"
-      
-      - name: 7zip folder
-        if: ${{ github.event.inputs.merge_gguf == 'false' }}
-        shell: bash
-        run: |        
-          ls -l D:/models
-          mkdir D:/volumes
-          7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\${{ steps.get_base_name.outputs.BASE_NAME }}.7z" "D:\models\*"
+          mkdir D:\volumes
+          Get-ChildItem -Path 'D:\models' -Filter '*.gguf' | ForEach-Object {
+            $basename = [System.IO.Path]::GetFileNameWithoutExtension($_.Name)
+            Write-Host "Compressing $($_.Name) -> $basename.7z"
+            7z a -v${{ github.event.inputs.split_size }}m "D:\volumes\$basename.7z" "$($_.FullName)"
+          }
       
       - name: check zipped
         shell: bash
