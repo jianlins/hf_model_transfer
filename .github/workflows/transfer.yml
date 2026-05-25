@@ -73,6 +73,7 @@ jobs:
         env:
           HF_MODEL: ${{ github.event.inputs.model_name }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          PYTHONUTF8: "1"
         run: |
           hf download $env:HF_MODEL --local-dir ./models
 
